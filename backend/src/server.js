@@ -26,6 +26,7 @@
 const express = require('express'); // IMPORT EXPRESS FRAMEWORK FOR ROUTING AND MIDDLEWARE
 const cors = require('cors'); // IMPORT CORS MIDDLEWARE FOR CROSS-ORIGIN REQUEST HANDLING
 const dotenv = require('dotenv'); // IMPORT ENVIRONMENT VARIABLE MANAGEMENT TOOL
+const routes = require('./routes'); // IMPORT MODULAR ROUTE DEFINITIONS
 
 /**
  * ENVIRONMENT CONFIGURATION
@@ -75,6 +76,29 @@ app.use(express.json());
  * EXAMPLE USE:
  * GET http://localhost:5000/
  */
+
+/**
+ * ROUTE CONFIGURATION
+ * MOUNTS MODULAR ROUTES WITH '/api' PREFIX FOR CLEAN API VERSIONING
+ * ALL ROUTES DEFINED IN ROUTES.JS WILL BE ACCESSIBLE UNDER /api/*
+ */
+app.use('/api', routes);
+
+/**
+ * ROOT ENDPOINT FOR SERVER STATUS CHECK
+ * PROVIDES BASIC HEALTH CHECK FUNCTIONALITY AND SERVER VERIFICATION
+ * 
+ * PARAMETERS:
+ * @param {express.Request} req - INCOMING REQUEST OBJECT
+ * @param {express.Response} res - OUTGOING RESPONSE OBJECT
+ * 
+ * RESPONSE:
+ * - 200 STATUS WITH SERVER STATUS MESSAGE
+ * 
+ * EXAMPLE USE:
+ * GET http://localhost:5000/
+ */
+
 app.get('/', (req, res) => {
     res.send('API is running...'); // SERVER STATUS RESPONSE
 });
