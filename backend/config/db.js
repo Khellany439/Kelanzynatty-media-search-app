@@ -21,19 +21,36 @@
 const { Sequelize } = require('sequelize');
 require('dotenv').config(); // LOAD ENVIRONMENT VARIABLES
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 /**
  * SEQUELIZE DATABASE INSTANCE
  * CONFIGURED WITH ENVIRONMENT VARIABLES FOR FLEXIBLE DEPLOYMENT
  * @type {Sequelize}
  */
 const sequelize = new Sequelize(
-    process.env.DB_NAME,    // DATABASE NAME FROM ENV
-    process.env.DB_USER,    // DATABASE USER FROM ENV
-    process.env.DB_PASS,    // DATABASE PASSWORD FROM ENV 
+    process.env.DB_NAME,
+    process.env.DB_USER,
+    process.env.DB_PASS,
     {
-        host: process.env.DB_HOST || 'localhost', // FALLBACK TO LOCALHOST
-        dialect: 'postgres', // EXPLICITLY SET POSTGRES DIALECT
-        logging: false,      // DISABLE SQL QUERY LOGGING BY DEFAULT
+        host: process.env.DB_HOST || 'localhost',
+        port: process.env.DB_PORT || 5432, // Added port configuration
+        dialect: 'postgres',
+        logging: process.env.NODE_ENV === 'development' ? console.log : false,
+        pool: { // Uncommented and optimized pool settings
+            max: 5,
+            min: 0,
+            acquire: 30000,
+            idle: 10000
+        },
+        dialectOptions: isProduction ? { // Conditional SSL for production
+            ssl: {
+                require: true,
+                rejectUnauthorized: false
+            }
+        } : {}
+    }
+);
         
         // RECOMMENDED PRODUCTION SETTINGS (UNCOMMENT AS NEEDED)
         // pool: {
@@ -48,9 +65,7 @@ const sequelize = new Sequelize(
         //         rejectUnauthorized: false
         //     }
         // }
-    }
-);
-
+  
 /**
  * DATABASE CONNECTION TESTER
  * VERIFIES ACTIVE CONNECTION TO POSTGRESQL INSTANCE
@@ -121,4 +136,4 @@ module.exports = { sequelize, connectDB };
  * OPTIONAL PARAMETERS:
  * - DB_PORT: DATABASE PORT (DEFAULT: 5432)
  * - DB_SSL: ENABLE SSL (TRUE/FALSE)
- /
+ */
