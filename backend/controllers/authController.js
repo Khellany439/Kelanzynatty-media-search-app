@@ -105,46 +105,76 @@ exports.register = async (req, res) => {
  */
 
 exports.login = async (req, res) => {
+  console.log('🚨 Login Request Body:', { 
+    email: req.body?.email, 
+    password: req.body?.password ? '***' : 'missing' 
+  });
+
   const { email, password } = req.body;
 
   // Validate input
   if (!email || !password) {
+    console.error('🚨 Validation Failed - Missing:', { 
+      missingEmail: !email, 
+      missingPassword: !password 
+    });
     return res.status(400).json({ message: 'EMAIL AND PASSWORD ARE REQUIRED' });
   }
 
   try {
-    // Find user by email
+    console.log('🔍 Attempting User Lookup:', email);
     const user = await User.findOne({ where: { email } });
 
     if (!user) {
+      console.error('🚨 User Not Found:', email);
       return res.status(401).json({ message: 'INVALID CREDENTIALS (EMAIL)' });
     }
 
-    // Compare passwords
+    console.log('🔑 User Found - Password Comparison Initiated');
     const isMatch = await bcrypt.compare(password, user.password);
+    
     if (!isMatch) {
+      console.error('🔒 Password Mismatch for User:', email);
       return res.status(401).json({ message: 'INVALID CREDENTIALS (PASSWORD)' });
     }
 
-    // Generate JWT
+    console.log('✅ Credentials Valid - Generating JWT');
     const token = jwt.sign(
       { id: user.id, email: user.email },
       process.env.JWT_SECRET || 'default_secret_key',
       { expiresIn: '1h' }
     );
 
-    // Success response
+    if (!process.env.JWT_SECRET) {
+      console.warn('⚠️  Using Fallback JWT Secret - Not Recommended for Production');
+    }
+
+    console.log(`🎯 Login Successful for User: ${user.id} (${email})`);
     return res.status(200).json({
       token,
       user: {
         id: user.id,
-        name: user.name, // or user.username if that's the field
+        name: user.name,
         email: user.email
       }
     });
+
   } catch (err) {
-    console.error('Login Error:', err);
-    return res.status(500).json({ message: 'SERVER ERROR DURING LOGIN' });
+    console.error('🚨 Critical Login Error:', {
+      errorMessage: err.message,
+      stack: err.stack,
+      rawError: err
+    });
+
+    // Specific database error checks
+    if (err.name === 'SequelizeDatabaseError') {
+      console.error('💾 Database Error:', err.original?.message);
+    }
+
+    return res.status(500).json({ 
+      message: 'SERVER ERROR DURING LOGIN',
+      debugId: `ERR-${Date.now()}` // Unique ID for error tracking
+    });
   }
 };
 

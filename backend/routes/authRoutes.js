@@ -58,7 +58,7 @@ router.post('/register', register);
  * 
  * REQUEST BODY SCHEMA:
  * {
- *   "username": "string (required)",
+ *   "email": "string (required)",
  *   "password": "string (required)"
  * }
  * 
