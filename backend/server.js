@@ -23,7 +23,9 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
-const { connectDB } = require('./config/db');
+const { sequelize, connectDB } = require('./config/db');
+const authRoutes = require('./routes/authRoutes');
+const mediaRoutes = require('./routes/mediaRoutes');
 
 // LOAD ENVIRONMENT VARIABLES FROM .ENV FILE
 dotenv.config();
@@ -52,17 +54,9 @@ app.use(express.json());
 app.use(cookieParser());
 
 /**
- * DATABASE CONNECTION
- * ESTABLISHES CONNECTION TO POSTGRESQL DATABASE
- */
-connectDB();
-
-/**
  * ROUTE CONFIGURATION
  * MODULAR ROUTE HANDLERS FOR DIFFERENT API SECTIONS
  */
-const authRoutes = require('./routes/authRoutes');
-const mediaRoutes = require('./routes/mediaRoutes');
 
 // MOUNT ROUTES WITH PATH PREFIXES
 app.use('/api/auth', authRoutes); // AUTHENTICATION ENDPOINTS
@@ -73,7 +67,7 @@ app.use('/api/media', mediaRoutes); // MEDIA SEARCH ENDPOINTS
  * PROVIDES SERVER STATUS VERIFICATION
  */
 app.get('/', (req, res) => {
-  res.send('WELCOME TO THE OPEN MEDIA SEARCH API');
+  res.send('WELCOME TO KELANZY!! OPEN MEDIA SEARCH API');
 });
 
 /**
@@ -86,13 +80,40 @@ app.use((err, req, res, next) => {
 });
 
 /**
- * SERVER INITIALIZATION
- * BINDS APPLICATION TO CONFIGURED PORT AND STARTS LISTENING
+ * ENHANCED DATABASE INITIALIZATION
+ * PROPERLY HANDLES MODEL SYNCING AND CONNECTION
  */
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`SERVER RUNNING ON HTTP://LOCALHOST:${PORT}`);
-});
+async function initializeDatabase() {
+  try {
+    await connectDB(); // Test connection first
+    await sequelize.sync({ alter: true }); // Sync models with database
+    console.log('Database synchronized successfully');
+  } catch (error) {
+    console.error('Database initialization failed:', error);
+    process.exit(1); // Exit on critical DB failure
+  }
+}
+
+/**
+ * SERVER INITIALIZATION FLOW
+ */
+async function startServer() {
+  const PORT = process.env.PORT || 5000;
+  
+  try {
+    await initializeDatabase();
+    
+    app.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error('Server startup failed:', error);
+    process.exit(1);
+  }
+}
+
+// Start the application
+startServer();
 
 /**
  * PRODUCTION CONSIDERATIONS:

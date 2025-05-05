@@ -31,11 +31,12 @@ const isProduction = process.env.NODE_ENV === 'production';
 const sequelize = new Sequelize(
     process.env.DB_NAME,
     process.env.DB_USER,
-    process.env.DB_PASS,
+    process.env.DB_PASSWORD,
     {
         host: process.env.DB_HOST || 'localhost',
         port: process.env.DB_PORT || 5432, // Added port configuration
         dialect: 'postgres',
+        
         logging: process.env.NODE_ENV === 'development' ? console.log : false,
         pool: { // Uncommented and optimized pool settings
             max: 5,

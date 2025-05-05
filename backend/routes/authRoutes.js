@@ -24,7 +24,7 @@ const express = require('express');
 const router = express.Router(); // CREATE MODULAR ROUTE HANDLER
 
 // IMPORT CONTROLLER FUNCTIONS WITH BUSINESS LOGIC
-const { registerUser, loginUser } = require('../controllers/authController');
+const { register, login } = require('../controllers/authController');
 
 /**
  * USER REGISTRATION ENDPOINT
@@ -48,7 +48,7 @@ const { registerUser, loginUser } = require('../controllers/authController');
  * - REQUIRES HTTPS IN PRODUCTION
  * - PASSWORD HASHED BEFORE STORAGE
  */
-router.post('/register', registerUser);
+router.post('/register', register);
 
 /**
  * USER AUTHENTICATION ENDPOINT
@@ -71,7 +71,7 @@ router.post('/register', registerUser);
  * - USES TIMING-SAFE BCRYPT COMPARISON
  * - JWT TOKEN EXPIRATION ENFORCED
  */
-router.post('/login', loginUser);
+router.post('/login', login);
 
 /**
  * MODULE EXPORTS
