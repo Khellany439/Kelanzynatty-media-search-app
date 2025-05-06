@@ -1,25 +1,30 @@
 {
   "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-    "target": "ES2022",
-    "lib": ["ES2023"],
-    "module": "ESNext",
-    "skipLibCheck": true,
+    // Enable composite mode for project references
+    "composite": true,
 
-    /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
+    // For modern ES features and module resolution
+    "target": "ESNext", // Use the latest version of ECMAScript
+    "lib": ["DOM", "DOM.Iterable", "ESNext"], // Include the necessary DOM and ES types
+
+    // Enable strict mode, it's essential for clean code
+    "strict": true,
+    "skipLibCheck": true, // Skip lib checks for faster builds
+    "module": "ESNext", // Use ESNext modules
+    "moduleResolution": "Node", // Node style module resolution (for project references)
+    "allowSyntheticDefaultImports": true, // Allow synthetic imports for better compatibility
+
+    // Enable bundler compatibility if you're using Vite/Webpack or similar tools
+    "allowImportingTsExtensions": true, 
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
-    "noEmit": true,
 
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    // Allow TypeScript to emit files
+    "noEmit": false, // Ensure output is emitted, required for project references
+
+    // TypeScript build info (helps with incremental builds)
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts"], // Ensure your Vite config is included
+  "references": [{ "path": "./tsconfig.node.json" }] // Keep project reference for builds
 }
