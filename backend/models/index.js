@@ -1,111 +1,155 @@
 /**
- * SEQUELIZE MODEL CONFIGURATION MODULE
- * CENTRALIZED MODEL DEFINITION AND DATABASE INSTANCE MANAGEMENT.
- * INITIALIZES ALL APPLICATION MODELS AND EXPORTS CONFIGURED SEQUELIZE INSTANCE.
+ * Sequelize Model Configuration Module
  * 
- * KEY RESPONSIBILITIES:
- * - SEQUELIZE LIBRARY AND INSTANCE MANAGEMENT
- * - MODEL DEFINITION AND REGISTRATION
- * - DATABASE SCHEMA RELATIONSHIP CONFIGURATION
+ * Centralized model definition and database instance management with TypeScript support.
+ * Initializes all application models and exports configured Sequelize instance with
+ * proper typing for enhanced developer experience.
  * 
- * AUTHOR: KELANZY
- * DATE: 2023-10-23
- * VERSION: 1.0.0
- * REQUIREMENTS:
- * - SEQUELIZE INSTANCE CONFIGURED IN config/db.js
- * - MODEL DEFINITION FILES IN models DIRECTORY
+ * @module models/index
+ * @author Kelanzy
+ * @version 2.0.0
+ * @license MIT
  */
 
-const User = require('./user');
-const Sequelize = require('sequelize');
-const sequelize = require('../config/db'); // DATABASE CONNECTION INSTANCE
-const SearchHistory = require('./searchHistory');
+import { Sequelize, Model, DataTypes } from 'sequelize';
+import sequelize from '../config/database';
+import { User } from './user';
+import { SearchHistory } from './searchHistory';
 
-/**
- * DATABASE OBJECT CONTAINER
- * PROVIDES ACCESS TO SEQUELIZE COMPONENTS AND MODEL INSTANCES
- * @type {Object}
- * @property {Sequelize} Sequelize - SEQUELIZE LIBRARY
- * @property {Sequelize} sequelize - CONFIGURED DATABASE INSTANCE
- * @property {Model} User - USER MODEL INSTANCE
- * @property {Model} SearchHistory - SEARCH HISTORY MODEL INSTANCE
- */
-const db = {
-    User, SearchHistory
+// Database interface with all models
+interface Database {
+  Sequelize: typeof Sequelize;
+  sequelize: Sequelize;
+  User: typeof User;
+  SearchHistory: typeof SearchHistory;
+  // Add other models here as you create them
+}
+
+// Initialize database object
+const db: Database = {
+  Sequelize,
+  sequelize,
+  User,
+  SearchHistory
 };
 
-// EXPOSE SEQUELIZE COMPONENTS
-db.Sequelize = Sequelize;
-db.sequelize = sequelize;
+// Model relationships configuration
+function setupRelationships(): void {
+  // User to SearchHistory (One-to-Many)
+  db.User.hasMany(db.SearchHistory, {
+    foreignKey: 'userId',
+    as: 'searchHistory'
+  });
+
+  db.SearchHistory.belongsTo(db.User, {
+    foreignKey: 'userId',
+    as: 'user'
+  });
+
+  // Add other relationships here
+}
+
+// Initialize all models
+export function initializeModels(): void {
+  // This would be called during application startup
+  setupRelationships();
+
+  if (process.env.NODE_ENV === 'development') {
+    syncDatabase();
+  }
+}
+
+// Database synchronization (development only)
+async function syncDatabase(options = {}): Promise<void> {
+  try {
+    const syncOptions = {
+      force: process.env.DB_SYNC_FORCE === 'true',
+      alter: process.env.DB_SYNC_ALTER === 'true',
+      ...options
+    };
+
+    if (process.env.NODE_ENV !== 'test') {
+      logger.info(`Database sync options: ${JSON.stringify(syncOptions)}`);
+    }
+
+    await db.sequelize.sync(syncOptions);
+    logger.info('Database synchronized successfully');
+  } catch (error) {
+    logger.error('Database synchronization failed', error);
+    process.exit(1);
+  }
+}
+
+// Export initialized database instance
+export default db;
 
 /**
- * MODEL INITIALIZATION
- * REGISTERS EACH MODEL WITH THE SEQUELIZE INSTANCE
+ * Security Best Practices:
+ * 1. Always use parameterized queries through Sequelize
+ * 2. Implement field-level validation in model definitions
+ * 3. Use model hooks for data sanitization
  * 
- * USER MODEL:
- * - REQUIRES ./user MODEL DEFINITION FILE
- * - PASSES SEQUELIZE INSTANCE AND DATA TYPES
+ * Performance Optimization:
+ * 1. Add indexes for frequently queried fields
+ * 2. Consider read replicas for scaling
+ * 3. Use appropriate data types for storage efficiency
  * 
- * SEARCH HISTORY MODEL:
- * - REQUIRES ./searchHistory MODEL DEFINITION FILE
- * - PASSES SEQUELIZE INSTANCE AND DATA TYPES
+ * Development Tips:
+ * 1. Use migrations for production schema changes
+ * 2. Implement model factories for testing
+ * 3. Enable logging in development environment
+ * 
+ * Production Recommendations:
+ * 1. Disable automatic synchronization
+ * 2. Implement connection pooling
+ * 3. Monitor long-running queries
  */
-db.User = User;
-db.SearchHistory = SearchHistory;
 
 /**
- * MODEL RELATIONSHIPS
- * DEFINE ASSOCIATIONS BETWEEN MODELS HERE
+ * Example User Model Definition (models/user.ts):
  * 
- * EXAMPLE:
- * db.User.hasMany(db.SearchHistory, { foreignKey: 'user_id' });
- * db.SearchHistory.belongsTo(db.User, { foreignKey: 'user_id' });
- */
-
-/**
- * DATABASE SYNCHRONIZATION
- * OPTIONAL SYNC OPERATION FOR DEVELOPMENT ENVIRONMENTS
+ * import { Model, DataTypes } from 'sequelize';
+ * import { sequelize } from '../config/database';
  * 
- * DEVELOPMENT USAGE:
- * sequelize.sync({ force: true }) // DROPS TABLES AND RECREATES
- *   .then(() => console.log('DATABASE SYNCED'))
- *   .catch(err => console.error('SYNC ERROR:', err));
- */
-
-
-module.exports = db;
-
-/**
- * SECURITY CONSIDERATIONS:
- * 1. USE PARAMETERIZED QUERIES THROUGH SEQUELIZE
- * 2. VALIDATE MODEL INPUTS WITH SCHEMA CONSTRAINTS
- * 3. IMPLEMENT FIELD SANITIZATION IN MODEL HOOKS
+ * class User extends Model {
+ *   public id!: number;
+ *   public name!: string;
+ *   public email!: string;
+ *   public password!: string;
  * 
- * PERFORMANCE TIPS:
- * 1. ADD INDEXES FOR FREQUENTLY QUERIED FIELDS
- * 2. USE LAZY LOADING FOR LARGE RELATIONSHIPS
- * 3. OPTIMIZE DATATYPES FOR STORAGE EFFICIENCY
+ *   public readonly createdAt!: Date;
+ *   public readonly updatedAt!: Date;
+ * }
  * 
- * ERROR HANDLING:
- * 1. IMPLEMENT MODEL VALIDATION ERRORS
- * 2. HANDLE DATABASE CONNECTION ERRORS
- * 3. USE TRANSACTIONS FOR CRITICAL OPERATIONS
+ * User.init({
+ *   id: {
+ *     type: DataTypes.INTEGER,
+ *     autoIncrement: true,
+ *     primaryKey: true
+ *   },
+ *   name: {
+ *     type: DataTypes.STRING(100),
+ *     allowNull: false
+ *   },
+ *   email: {
+ *     type: DataTypes.STRING(100),
+ *     allowNull: false,
+ *     unique: true,
+ *     validate: {
+ *       isEmail: true
+ *     }
+ *   },
+ *   password: {
+ *     type: DataTypes.STRING(255),
+ *     allowNull: false
+ *   }
+ * }, {
+ *   sequelize,
+ *   modelName: 'user',
+ *   tableName: 'users',
+ *   timestamps: true,
+ *   paranoid: true // Enable soft deletes
+ * });
  * 
- * RELATED MODULES:
- * - config/db.js: DATABASE CONNECTION CONFIGURATION
- * - models/user.js: USER MODEL DEFINITION
- * - models/searchHistory.js: SEARCH HISTORY MODEL DEFINITION
- * - migrations/: DATABASE SCHEMA MIGRATION FILES
- */
-
-/**
- * MODEL REGISTRATION NOTES:
- * 1. EACH MODEL FILE SHOULD EXPORT A FUNCTION THAT ACCEPTS
- *    (SEQUELIZE, DATATYPES) PARAMETERS
- * 2. MODEL DEFINITIONS SHOULD INCLUDE:
- *    - FIELD DEFINITIONS WITH DATATYPES
- *    - MODEL OPTIONS AND VALIDATIONS
- *    - HOOKS FOR BUSINESS LOGIC
- * 3. ASSOCIATIONS SHOULD BE DEFINED IN SEPARATE FILE
- *    OR IN THIS CONFIGURATION MODULE
+ * export { User };
  */

@@ -1,156 +1,106 @@
 /**
- * AUTHENTICATION CONTROLLER MODULE
- * HANDLES USER REGISTRATION, LOGIN, AND PROFILE MANAGEMENT WITH SECURE CREDENTIAL PROCESSING.
- * IMPLEMENTS BCRYPT FOR PASSWORD HASHING AND JWT FOR TOKEN-BASED AUTHENTICATION.
+ * Authentication Controller Module
  * 
- * KEY FUNCTIONALITIES:
- * - USER REGISTRATION WITH EMAIL VERIFICATION
- * - PASSWORD HASHING AND CREDENTIAL VALIDATION
- * - JWT TOKEN GENERATION AND SESSION MANAGEMENT
- * - USER PROFILE RETRIEVAL WITH ACCESS CONTROL
+ * Handles user authentication flows with enhanced security and TypeScript support.
+ * Implements modern security practices including password hashing, JWT tokens,
+ * and comprehensive input validation.
  * 
- * AUTHOR: KELANZY
- * DATE: 2023-10-23
- * VERSION: 1.0.0
- * REQUIREMENTS:
- * - BCRYPT: PASSWORD HASHING LIBRARY
- * - JSONWEBTOKEN: JWT IMPLEMENTATION
- * - MYSQL DATABASE CONNECTION POOL
- * - JWT_SECRET ENVIRONMENT VARIABLE
+ * @module controllers/authController
+ * @author Kelanzy
+ * @version 2.0.0
+ * @license MIT
  */
 
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const db = require('../config/db');
-const { User } = require('../models'); // Make sure your User model is properly exported from models/index.js
+import { Request, Response } from 'express';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import { User } from '../models/User';
+import { logger } from '../utils/logger';
+import { validationResult } from 'express-validator';
 
-require('dotenv').config();
+// Type definitions
+interface RegisterRequest {
+  name: string;
+  email: string;
+  password: string;
+}
+
+interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+interface AuthResponse {
+  message: string;
+  token?: string;
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+}
+
+// Constants
+const SALT_ROUNDS = 10;
+const TOKEN_EXPIRY = '1h';
+const JWT_SECRET = process.env.JWT_SECRET || 'default_secret_key';
+
+if (!process.env.JWT_SECRET) {
+  logger.warn('⚠️  Using fallback JWT secret - Not recommended for production');
+}
 
 /**
- * USER REGISTRATION CONTROLLER
+ * User Registration Controller
  * 
- * @param {Object} req - EXPRESS REQUEST OBJECT WITH {username, email, password}
- * @param {Object} res - EXPRESS RESPONSE OBJECT
- * 
- * PROCESS FLOW:
- * 1. VALIDATE REQUIRED FIELDS
- * 2. CHECK FOR EXISTING EMAIL
- * 3. HASH PASSWORD WITH BCRYPT (COST FACTOR 10)
- * 4. STORE USER IN DATABASE
- * 
- * RESPONSES:
- * - 201 CREATED: SUCCESSFUL REGISTRATION
- * - 400 BAD REQUEST: MISSING REQUIRED FIELDS
- * - 409 CONFLICT: EMAIL ALREADY REGISTERED
- * - 500 INTERNAL ERROR: REGISTRATION FAILURE
- * 
- * SECURITY:
- * - USES PARAMETERIZED QUERIES TO PREVENT SQL INJECTION
- * - NEVER STORES PLAINTEXT PASSWORDS
+ * @async
+ * @function register
+ * @param {Request} req - Express request object
+ * @param {Response} res - Express response object
+ * @returns {Promise<Response<AuthResponse>>} Response with status and message
  */
+export const register = async (
+  req: Request<{}, {}, RegisterRequest>,
+  res: Response<AuthResponse>
+): Promise<Response> => {
+  // Input validation
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    logger.warn('Registration validation failed', { errors: errors.array() });
+    return res.status(400).json({ message: 'Validation failed', ...errors.mapped() });
+  }
 
-exports.register = async (req, res) => {
   const { name, email, password } = req.body;
 
-  // INPUT VALIDATION
-  if (!name || !email || !password)
-    return res.status(400).json({ message: 'ALL FIELDS ARE REQUIRED' });
-
   try {
-    // EXISTING USER CHECK
+    // Check for existing user
     const existingUser = await User.findOne({ where: { email } });
-    if (existingUser)
-      return res.status(409).json({ message: 'EMAIL ALREADY REGISTERED' });
+    if (existingUser) {
+      logger.warn('Registration attempt with existing email', { email });
+      return res.status(409).json({ message: 'Email already registered' });
+    }
 
-    // PASSWORD HASHING
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    logger.debug('Password hashed successfully');
 
-    // DATABASE INSERTION
-    await User.create({
+    // Create user
+    const user = await User.create({
       name,
       email,
       password: hashedPassword
     });
 
-    return res.status(201).json({ message: 'USER REGISTERED SUCCESSFULLY' });
-  } catch (err) {
-    console.error("Registration Error:", err);
-    return res.status(500).json({ message: 'SERVER ERROR DURING REGISTRATION' });
-  }
-};
+    logger.info('New user registered', { userId: user.id, email });
 
-
-/**
- * USER AUTHENTICATION CONTROLLER
- * 
- * @param {Object} req - EXPRESS REQUEST OBJECT WITH {email, password}
- * @param {Object} res - EXPRESS RESPONSE OBJECT
- * 
- * PROCESS FLOW:
- * 1. VALIDATE CREDENTIAL PRESENCE
- * 2. FETCH USER BY EMAIL
- * 3. COMPARE PASSWORD HASHES
- * 4. GENERATE JWT TOKEN
- * 
- * RESPONSES:
- * - 200 OK: AUTH SUCCESS WITH TOKEN AND USER DATA
- * - 400 BAD REQUEST: MISSING CREDENTIALS
- * - 401 UNAUTHORIZED: INVALID CREDENTIALS
- * - 500 INTERNAL ERROR: AUTHENTICATION FAILURE
- * 
- * SECURITY:
- * - TIMING-SAFE BCRYPT COMPARE
- * - TOKEN EXPIRES IN 1 HOUR
- * - SENSITIVE USER DATA EXCLUDED FROM RESPONSE
- */
-
-exports.login = async (req, res) => {
-  console.log('🚨 Login Request Body:', { 
-    email: req.body?.email, 
-    password: req.body?.password ? '***' : 'missing' 
-  });
-
-  const { email, password } = req.body;
-
-  // Validate input
-  if (!email || !password) {
-    console.error('🚨 Validation Failed - Missing:', { 
-      missingEmail: !email, 
-      missingPassword: !password 
-    });
-    return res.status(400).json({ message: 'EMAIL AND PASSWORD ARE REQUIRED' });
-  }
-
-  try {
-    console.log('🔍 Attempting User Lookup:', email);
-    const user = await User.findOne({ where: { email } });
-
-    if (!user) {
-      console.error('🚨 User Not Found:', email);
-      return res.status(401).json({ message: 'INVALID CREDENTIALS (EMAIL)' });
-    }
-
-    console.log('🔑 User Found - Password Comparison Initiated');
-    const isMatch = await bcrypt.compare(password, user.password);
-    
-    if (!isMatch) {
-      console.error('🔒 Password Mismatch for User:', email);
-      return res.status(401).json({ message: 'INVALID CREDENTIALS (PASSWORD)' });
-    }
-
-    console.log('✅ Credentials Valid - Generating JWT');
+    // Generate token for immediate login
     const token = jwt.sign(
       { id: user.id, email: user.email },
-      process.env.JWT_SECRET || 'default_secret_key',
-      { expiresIn: '1h' }
+      JWT_SECRET,
+      { expiresIn: TOKEN_EXPIRY }
     );
 
-    if (!process.env.JWT_SECRET) {
-      console.warn('⚠️  Using Fallback JWT Secret - Not Recommended for Production');
-    }
-
-    console.log(`🎯 Login Successful for User: ${user.id} (${email})`);
-    return res.status(200).json({
+    return res.status(201).json({
+      message: 'User registered successfully',
       token,
       user: {
         id: user.id,
@@ -159,99 +109,151 @@ exports.login = async (req, res) => {
       }
     });
 
-  } catch (err) {
-    console.error('🚨 Critical Login Error:', {
-      errorMessage: err.message,
-      stack: err.stack,
-      rawError: err
+  } catch (error) {
+    logger.error('Registration error', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
     });
+    return res.status(500).json({ message: 'Registration failed' });
+  }
+};
 
-    // Specific database error checks
-    if (err.name === 'SequelizeDatabaseError') {
-      console.error('💾 Database Error:', err.original?.message);
+/**
+ * User Login Controller
+ * 
+ * @async
+ * @function login
+ * @param {Request} req - Express request object
+ * @param {Response} res - Express response object
+ * @returns {Promise<Response<AuthResponse>>} Response with token and user data
+ */
+export const login = async (
+  req: Request<{}, {}, LoginRequest>,
+  res: Response<AuthResponse>
+): Promise<Response> => {
+  // Input validation
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    logger.warn('Login validation failed', { errors: errors.array() });
+    return res.status(400).json({ message: 'Validation failed', ...errors.mapped() });
+  }
+
+  const { email, password } = req.body;
+
+  try {
+    // Find user
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      logger.warn('Login attempt with non-existent email', { email });
+      return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    return res.status(500).json({ 
-      message: 'SERVER ERROR DURING LOGIN',
-      debugId: `ERR-${Date.now()}` // Unique ID for error tracking
-    });
-  }
-};
+    // Verify password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      logger.warn('Invalid password attempt', { email });
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
 
-/**
- * USER PROFILE CONTROLLER
- * 
- * @param {Object} req - EXPRESS REQUEST OBJECT WITH AUTH TOKEN
- * @param {Object} res - EXPRESS RESPONSE OBJECT
- * 
- * PROCESS FLOW:
- * 1. EXTRACT USER ID FROM VALIDATED TOKEN
- * 2. FETCH USER PROFILE FROM DATABASE
- * 3. RETURN SANITIZED USER DATA
- * 
- * RESPONSES:
- * - 200 OK: USER PROFILE DATA
- * - 404 NOT FOUND: USER DOES NOT EXIST
- * - 500 INTERNAL ERROR: PROFILE FETCH FAILURE
- * 
- * SECURITY:
- * - REQUIRES VALID JWT TOKEN
- * - EXCLUDES SENSITIVE FIELDS (PASSWORD)
- */
-exports.getProfile = async (req, res) => {
-  try {
-    // USER PROFILE FETCH
-    const [userRows] = await db.execute(
-      'SELECT id, username, email FROM users WHERE id = ?', 
-      [req.user.id]
+    // Generate token
+    const token = jwt.sign(
+      { id: user.id, email: user.email },
+      JWT_SECRET,
+      { expiresIn: TOKEN_EXPIRY }
     );
 
-    if (userRows.length === 0)
-      return res.status(404).json({ message: 'USER NOT FOUND' });
+    logger.info('User logged in successfully', { userId: user.id });
 
-    return res.json({ user: userRows[0] });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: 'SERVER ERROR FETCHING USER PROFILE' });
+    return res.status(200).json({
+      message: 'Login successful',
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    logger.error('Login error', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    return res.status(500).json({ message: 'Login failed' });
   }
 };
 
 /**
- * SECURITY CONSIDERATIONS:
- * 1. IMPLEMENT RATE LIMITING ON AUTH ENDPOINTS
- * 2. ADD PASSWORD COMPLEXITY REQUIREMENTS
- * 3. USE HTTPS IN PRODUCTION ENVIRONMENTS
- * 4. IMPLEMENT REFRESH TOKEN ROTATION
+ * User Profile Controller
  * 
- * IMPROVEMENT OPPORTUNITIES:
- * - EMAIL VERIFICATION WORKFLOW
- * - PASSWORD RESET FUNCTIONALITY
- * - TWO-FACTOR AUTHENTICATION
- * - SESSION AUDIT LOGGING
- * 
- * ERROR HANDLING STRATEGY:
- * 1. CENTRALIZED ERROR HANDLER MIDDLEWARE
- * 2. STRUCTURED ERROR CODES AND MESSAGES
- * 3. SENSITIVE DATA MASKING IN LOGS
- * 
- * RELATED MODULES:
- * - authMiddleware.js: TOKEN VALIDATION
- * - userModel.js: DATA SCHEMA DEFINITION
- * - rateLimiter.js: BRUTE FORCE PROTECTION
- * - mailer.js: EMAIL NOTIFICATIONS
+ * @async
+ * @function getProfile
+ * @param {Request} req - Authenticated request
+ * @param {Response} res - Express response object
+ * @returns {Promise<Response>} Response with user profile
  */
+export const getProfile = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    // The user should be attached to the request by the auth middleware
+    if (!req.user) {
+      logger.error('Profile access without authentication');
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const user = await User.findByPk(req.user.id, {
+      attributes: ['id', 'name', 'email', 'createdAt'] // Explicitly exclude password
+    });
+
+    if (!user) {
+      logger.warn('User not found for profile request', { userId: req.user.id });
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    logger.debug('Profile fetched successfully', { userId: user.id });
+    return res.json({ user });
+
+  } catch (error) {
+    logger.error('Profile fetch error', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      userId: req.user?.id
+    });
+    return res.status(500).json({ message: 'Failed to fetch profile' });
+  }
+};
 
 /**
- * PERFORMANCE NOTES:
- * - DATABASE INDEX ON EMAIL FIELD FOR FAST LOOKUPS
- * - CACHE FREQUENTLY ACCESSED USER PROFILES
- * - OPTIMIZE BCRYPT COST FACTOR BASED ON HARDWARE
+ * Security Middleware (Example)
  * 
- * EXAMPLE TOKEN PAYLOAD:
- * {
- *   "id": 123,
- *   "email": "user@example.com",
- *   "iat": 1698094302,
- *   "exp": 1698097902
- * }
+ * This would typically be in a separate file but shown here for completeness
  */
+export const authMiddleware = async (
+  req: Request,
+  res: Response,
+  next: Function
+): Promise<void> => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string };
+    const user = await User.findByPk(decoded.id);
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    logger.warn('Authentication failed', {
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    res.status(401).send({ message: 'Please authenticate' });
+  }
+};

@@ -1,140 +1,158 @@
 /**
- * DATABASE CONNECTION MODULE
- * CONFIGURES AND MANAGES POSTGRESQL DATABASE CONNECTIONS USING SEQUELIZE ORM.
- * PROVIDES DATABASE INSTANCE AND CONNECTION TESTING FUNCTIONALITY.
+ * Database Connection Module
  * 
- * KEY FEATURES:
- * - ENVIRONMENT-BASED CONFIGURATION USING DOTENV
- * - CONNECTION POOL MANAGEMENT (DEFAULT SEQUELIZE SETTINGS)
- * - SILENT OPERATION IN PRODUCTION (LOGGING DISABLED)
- * - SECURE CREDENTIALS HANDLING THROUGH ENVIRONMENT VARIABLES
+ * Configures and manages PostgreSQL database connections using Sequelize ORM.
+ * Provides database instance and connection testing functionality with enhanced
+ * TypeScript support and production-ready configurations.
  * 
- * AUTHOR: KELANZY
- * DATE: 2023-10-23
- * VERSION: 1.0.0
- * REQUIREMENTS:
- * - POSTGRESQL SERVER INSTANCE
- * - PG PACKAGE INSTALLED
- * - VALID ENVIRONMENT VARIABLES SET
+ * @module database
+ * @author Kelanzy
+ * @version 2.0.0
+ * @license MIT
  */
 
-const { Sequelize } = require('sequelize');
-require('dotenv').config(); // LOAD ENVIRONMENT VARIABLES
+import { Sequelize, Dialect, Options } from 'sequelize';
+import dotenv from 'dotenv';
+import { logger } from '../utils/logger'; // Assuming you have a logger utility
+
+dotenv.config();
+
+// Type definitions for database configuration
+interface DatabaseConfig {
+  name: string;
+  user: string;
+  password: string;
+  host: string;
+  port: number;
+  dialect: Dialect;
+  logging: Options['logging'];
+  pool: {
+    max: number;
+    min: number;
+    acquire: number;
+    idle: number;
+  };
+  dialectOptions?: {
+    ssl?: {
+      require: boolean;
+      rejectUnauthorized: boolean;
+    };
+  };
+}
+
+// Environment variables validation
+const requiredEnvVars = ['DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    throw new Error(`Missing required environment variable: ${envVar}`);
+  }
+}
 
 const isProduction = process.env.NODE_ENV === 'production';
+const isTest = process.env.NODE_ENV === 'test';
 
 /**
- * SEQUELIZE DATABASE INSTANCE
- * CONFIGURED WITH ENVIRONMENT VARIABLES FOR FLEXIBLE DEPLOYMENT
+ * Database configuration object
+ * @type {DatabaseConfig}
+ */
+const dbConfig: DatabaseConfig = {
+  name: process.env.DB_NAME as string,
+  user: process.env.DB_USER as string,
+  password: process.env.DB_PASSWORD as string,
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432'),
+  dialect: 'postgres',
+  logging: process.env.DB_LOGGING === 'true' ? console.log : false,
+  pool: {
+    max: parseInt(process.env.DB_POOL_MAX || '5'),
+    min: parseInt(process.env.DB_POOL_MIN || '0'),
+    acquire: parseInt(process.env.DB_POOL_ACQUIRE || '30000'),
+    idle: parseInt(process.env.DB_POOL_IDLE || '10000')
+  },
+  ...(isProduction && {
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false
+      }
+    }
+  })
+};
+
+if (isTest) {
+  dbConfig.name = process.env.TEST_DB_NAME as string;
+}
+
+/**
+ * Sequelize database instance
  * @type {Sequelize}
  */
 const sequelize = new Sequelize(
-    process.env.DB_NAME,
-    process.env.DB_USER,
-    process.env.DB_PASSWORD,
-    {
-        host: process.env.DB_HOST || 'localhost',
-        port: process.env.DB_PORT || 5432, // Added port configuration
-        dialect: 'postgres',
-        
-        logging: process.env.NODE_ENV === 'development' ? console.log : false,
-        pool: { // Uncommented and optimized pool settings
-            max: 5,
-            min: 0,
-            acquire: 30000,
-            idle: 10000
-        },
-        dialectOptions: isProduction ? { // Conditional SSL for production
-            ssl: {
-                require: true,
-                rejectUnauthorized: false
-            }
-        } : {}
-    }
+  dbConfig.name,
+  dbConfig.user,
+  dbConfig.password,
+  dbConfig
 );
-        
-        // RECOMMENDED PRODUCTION SETTINGS (UNCOMMENT AS NEEDED)
-        // pool: {
-        //     max: 5,
-        //     min: 0,
-        //     acquire: 30000,
-        //     idle: 10000
-        // },
-        // dialectOptions: {
-        //     ssl: {
-        //         require: true,
-        //         rejectUnauthorized: false
-        //     }
-        // }
-  
+
 /**
- * DATABASE CONNECTION TESTER
- * VERIFIES ACTIVE CONNECTION TO POSTGRESQL INSTANCE
+ * Tests the database connection and synchronizes models if needed
  * @async
- * @function connectDB
- * @throws {Error} CONNECTION FAILURE ERROR
+ * @function initializeDatabase
+ * @returns {Promise<void>}
+ * @throws {Error} When connection fails
  */
-const connectDB = async () => {
-    try {
-        await sequelize.authenticate();
-        console.log('✅ POSTGRESQL CONNECTION ESTABLISHED SUCCESSFULLY.');
-    } catch (error) {
-        console.error('❌ DATABASE CONNECTION FAILURE:', error);
-        process.exit(1); // EXIT PROCESS ON CONNECTION FAILURE
+export const initializeDatabase = async (): Promise<void> => {
+  try {
+    await sequelize.authenticate();
+    logger.info('✅ PostgreSQL connection established successfully');
+
+    if (process.env.DB_SYNC === 'true') {
+      await sequelize.sync({ alter: process.env.DB_ALTER === 'true' });
+      logger.info('Database models synchronized');
     }
+  } catch (error) {
+    logger.error('❌ Database connection failed', error as Error);
+    process.exit(1);
+  }
 };
 
 /**
- * MODULE EXPORTS
- * EXPORTS CONFIGURED SEQUELIZE INSTANCE AND CONNECTION TESTER
- * @exports {Sequelize} sequelize - SEQUELIZE DATABASE INSTANCE
- * @exports {function} connectDB - CONNECTION VERIFICATION FUNCTION
+ * Gracefully closes the database connection
+ * @async
+ * @function closeDatabase
+ * @returns {Promise<void>}
  */
-module.exports = { sequelize, connectDB };
+export const closeDatabase = async (): Promise<void> => {
+  try {
+    await sequelize.close();
+    logger.info('Database connection closed');
+  } catch (error) {
+    logger.error('Error closing database connection', error as Error);
+  }
+};
+
+// Handle application termination
+process.on('SIGTERM', closeDatabase);
+process.on('SIGINT', closeDatabase);
+
+export { sequelize, initializeDatabase, closeDatabase };
 
 /**
- * SECURITY CONSIDERATIONS:
- * 1. NEVER COMMIT CREDENTIALS TO VERSION CONTROL
- * 2. USE SSL CONNECTIONS IN PRODUCTION (SEE DIALECTOPTIONS)
- * 3. ROTATE DATABASE CREDENTIALS REGULARLY
- * 4. LIMIT DATABASE USER PRIVILEGES TO MINIMUM REQUIRED
+ * Security Best Practices:
+ * 1. Use environment variables for all sensitive credentials
+ * 2. Implement connection pooling with appropriate limits
+ * 3. Enable SSL in production environments
+ * 4. Regularly rotate database credentials
+ * 5. Implement proper logging without exposing sensitive data
  * 
- * PRODUCTION CONFIGURATION:
- * 1. ENABLE CONNECTION POOLING
- * 2. IMPLEMENT CONNECTION HEALTH CHECKS
- * 3. CONFIGURE PROPER SSL/TLS SETTINGS
- * 4. MONITOR CONNECTION LEAKS
+ * Production Recommendations:
+ * 1. Set DB_POOL_MAX based on your database capacity
+ * 2. Monitor connection pool usage
+ * 3. Implement retry logic for transient failures
+ * 4. Use read replicas for scaling
  * 
- * DEVELOPMENT TIPS:
- * 1. SET logging: true FOR QUERY DEBUGGING
- * 2. USE SEPARATE DATABASE INSTANCES FOR DEV/TEST/PROD
- * 3. IMPLEMENT MIGRATION SCRIPTS FOR SCHEMA CHANGES
- */
-
-/**
- * CONNECTION LIFECYCLE MANAGEMENT:
- * 1. CALL connectDB() DURING APPLICATION STARTUP
- * 2. IMPLEMENT GRACEFUL SHUTDOWN HANDLER:
- * 
- * process.on('SIGTERM', async () => {
- *     await sequelize.close();
- *     console.log('DATABASE CONNECTION CLOSED');
- * });
- * 
- * ERROR HANDLING STRATEGY:
- * 1. IMPLEMENT RETRY LOGIC FOR TRANSIENT CONNECTION ERRORS
- * 2. USE TRANSACTIONS FOR CRITICAL OPERATIONS
- * 3. MONITOR CONNECTION POOL USAGE METRICS
- */
-
-/**
- * ENVIRONMENT VARIABLE REQUIREMENTS:
- * - DB_NAME: DATABASE NAME
- * - DB_USER: DATABASE USERNAME
- * - DB_PASS: DATABASE PASSWORD
- * - DB_HOST: DATABASE HOST (OPTIONAL)
- * 
- * OPTIONAL PARAMETERS:
- * - DB_PORT: DATABASE PORT (DEFAULT: 5432)
- * - DB_SSL: ENABLE SSL (TRUE/FALSE)
+ * Development Tips:
+ * 1. Set DB_LOGGING=true for query debugging
+ * 2. Use DB_SYNC=true for automatic schema updates (not for production)
+ * 3. Implement migrations for schema changes
  */

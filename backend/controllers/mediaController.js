@@ -1,173 +1,254 @@
 /**
- * MEDIA CONTROLLER MODULE
- * HANDLES MEDIA SEARCH OPERATIONS USING OPENVERSE API AND MANAGES USER SEARCH HISTORY.
- * INTEGRATES EXTERNAL API CALLS WITH DATABASE OPERATIONS FOR SEARCH PERSISTENCE.
+ * Media Controller Module
  * 
- * KEY FUNCTIONALITIES:
- * - OPENVERSE MEDIA SEARCH WITH FILTERING
- * - USER-SPECIFIC SEARCH HISTORY MANAGEMENT
- * - SEARCH RECORD CRUD OPERATIONS
+ * Handles media search operations using Openverse API and manages user search history.
+ * Implements robust error handling and TypeScript interfaces for better maintainability.
  * 
- * AUTHOR: KELANZY
- * DATE: 2023-10-23
- * VERSION: 1.0.0
- * REQUIREMENTS:
- * - AXIOS: HTTP CLIENT FOR API REQUESTS
- * - MYSQL DATABASE CONNECTION
- * - OPENVERSE API ACCESS
+ * @module controllers/mediaController
+ * @author Kelanzy
+ * @version 2.0.0
+ * @license MIT
  */
 
-const axios = require('axios');
-const db = require('../config/db');
+import { Request, Response } from 'express';
+import axios, { AxiosError } from 'axios';
+import { db } from '../config/database';
+import { logger } from '../utils/logger';
+import { validationResult } from 'express-validator';
 
-/**
- * OPENVERSE API CONFIGURATION
- * BASE URL FOR OPENVERSE REST API V1 ENDPOINT
- * @constant {string}
- */
+// Type definitions
+interface OpenverseMedia {
+  id: string;
+  title: string;
+  url: string;
+  thumbnail: string;
+  license: string;
+  creator: string;
+}
+
+interface OpenverseResponse {
+  result_count: number;
+  page_count: number;
+  results: OpenverseMedia[];
+}
+
+interface SearchParams {
+  q: string;
+  media_type?: 'image' | 'audio' | 'video';
+  license?: string;
+  extension?: string;
+  page?: number;
+}
+
+interface SearchRecord {
+  id: number;
+  query: string;
+  media_type: string;
+  created_at: Date;
+}
+
+// Constants
 const OPENVERSE_API_BASE = 'https://api.openverse.org/v1';
+const MAX_SEARCH_HISTORY = 10;
+const DEFAULT_MEDIA_TYPE = 'image';
 
 /**
- * MEDIA SEARCH CONTROLLER
+ * Search media using Openverse API
  * 
- * @param {Object} req - EXPRESS REQUEST OBJECT WITH QUERY PARAMS
- * @param {Object} res - EXPRESS RESPONSE OBJECT
- * 
- * QUERY PARAMETERS:
- * - q: SEARCH QUERY STRING (REQUIRED)
- * - media_type: MEDIA TYPE FILTER (DEFAULT: 'image')
- * - license: LICENSE TYPE FILTER
- * - extension: FILE EXTENSION FILTER
- * 
- * RESPONSES:
- * - 200 OK: SEARCH RESULTS FROM OPENVERSE
- * - 400 BAD REQUEST: MISSING SEARCH QUERY
- * - 500 INTERNAL ERROR: API OR DATABASE FAILURE
- * 
- * PROCESS FLOW:
- * 1. VALIDATE REQUIRED QUERY PARAMETER
- * 2. EXECUTE OPENVERSE API REQUEST
- * 3. OPTIONALLY STORE SEARCH FOR AUTHENTICATED USERS
- * 4. RETURN API RESPONSE DATA
+ * @async
+ * @function searchMedia
+ * @param {Request} req - Express request object
+ * @param {Response} res - Express response object
  */
-exports.searchMedia = async (req, res) => {
-  const { q, media_type = 'image', license, extension } = req.query;
+export const searchMedia = async (
+  req: Request<{}, {}, {}, SearchParams>,
+  res: Response
+): Promise<Response> => {
+  // Input validation
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    logger.warn('Search validation failed', { errors: errors.array() });
+    return res.status(400).json({ 
+      message: 'Validation failed',
+      errors: errors.array() 
+    });
+  }
 
-  if (!q) return res.status(400).json({ message: 'SEARCH QUERY IS REQUIRED' });
+  const { q, media_type = DEFAULT_MEDIA_TYPE, license, extension, page = 1 } = req.query;
 
   try {
-    // EXECUTE OPENVERSE API REQUEST
-    const response = await axios.get(`${OPENVERSE_API_BASE}/${media_type}`, {
-      params: { q, license, extension },
-    });
+    // Execute Openverse API request
+    const response = await axios.get<OpenverseResponse>(
+      `${OPENVERSE_API_BASE}/${media_type}/`, 
+      {
+        params: { q, license, extension, page },
+        timeout: 5000 // 5 second timeout
+      }
+    );
 
-    // PERSIST SEARCH FOR AUTHENTICATED USERS
+    // Persist search for authenticated users
     if (req.user) {
-      await db.execute(
-        'INSERT INTO searches (user_id, query, media_type) VALUES (?, ?, ?)',
-        [req.user.id, q, media_type]
-      );
+      try {
+        await db.query(
+          'INSERT INTO searches (user_id, query, media_type) VALUES (?, ?, ?)',
+          [req.user.id, q, media_type]
+        );
+        logger.info('Search recorded', { userId: req.user.id, query: q });
+      } catch (dbError) {
+        logger.error('Failed to save search history', {
+          userId: req.user.id,
+          error: dbError instanceof Error ? dbError.message : 'Unknown error'
+        });
+      }
     }
 
-    return res.json(response.data);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: 'ERROR FETCHING DATA FROM OPENVERSE' });
+    return res.json({
+      success: true,
+      count: response.data.result_count,
+      results: response.data.results
+    });
+
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    
+    logger.error('Openverse API error', {
+      query: q,
+      error: axiosError.message,
+      status: axiosError.response?.status,
+      url: axiosError.config?.url
+    });
+
+    if (axiosError.response) {
+      return res.status(axiosError.response.status).json({
+        message: 'Openverse API error',
+        status: axiosError.response.status
+      });
+    }
+
+    return res.status(500).json({ 
+      message: 'Error fetching media',
+      error: 'API_REQUEST_FAILED'
+    });
   }
 };
 
 /**
- * RECENT SEARCHES CONTROLLER
+ * Get recent searches for authenticated user
  * 
- * @param {Object} req - AUTHENTICATED REQUEST OBJECT
- * @param {Object} res - EXPRESS RESPONSE OBJECT
- * 
- * RESPONSES:
- * - 200 OK: ARRAY OF 10 MOST RECENT SEARCHES
- * - 500 INTERNAL ERROR: DATABASE FAILURE
- * 
- * SECURITY:
- * - REQUIRES VALID AUTHENTICATION TOKEN
- * - ONLY RETURNS USER'S OWN SEARCH HISTORY
+ * @async
+ * @function getRecentSearches
+ * @param {Request} req - Authenticated request
+ * @param {Response} res - Express response
  */
-exports.getRecentSearches = async (req, res) => {
+export const getRecentSearches = async (
+  req: Request,
+  res: Response<SearchRecord[] | { message: string }>
+): Promise<Response> => {
+  if (!req.user) {
+    logger.warn('Unauthorized recent searches attempt');
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
   try {
-    const [results] = await db.execute(
-      'SELECT id, query, media_type, created_at FROM searches WHERE user_id = ? ORDER BY created_at DESC LIMIT 10',
-      [req.user.id]
+    const [results] = await db.query<SearchRecord[]>(
+      `SELECT id, query, media_type, created_at 
+       FROM searches 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT ?`,
+      [req.user.id, MAX_SEARCH_HISTORY]
     );
-    res.json(results);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'ERROR RETRIEVING RECENT SEARCHES' });
+
+    logger.debug('Fetched recent searches', { userId: req.user.id });
+    return res.json(results);
+
+  } catch (error) {
+    logger.error('Database error fetching searches', {
+      userId: req.user.id,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    return res.status(500).json({ message: 'Error retrieving search history' });
   }
 };
 
 /**
- * SEARCH DELETION CONTROLLER
+ * Delete a search record
  * 
- * @param {Object} req - REQUEST WITH SEARCH ID PARAMETER
- * @param {Object} res - EXPRESS RESPONSE OBJECT
- * 
- * PARAMETERS:
- * - searchId: ID OF SEARCH RECORD TO DELETE
- * 
- * RESPONSES:
- * - 200 OK: SUCCESSFUL DELETION
- * - 404 NOT FOUND: INVALID SEARCH ID OR UNAUTHORIZED
- * - 500 INTERNAL ERROR: DATABASE FAILURE
- * 
- * SECURITY:
- * - ENSURES USER ONLY DELETES THEIR OWN SEARCHES
+ * @async
+ * @function deleteSearch
+ * @param {Request} req - Request with search ID
+ * @param {Response} res - Express response
  */
-exports.deleteSearch = async (req, res) => {
+export const deleteSearch = async (
+  req: Request<{ searchId: string }>,
+  res: Response
+): Promise<Response> => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
   const { searchId } = req.params;
 
   try {
-    const [result] = await db.execute(
+    const [result] = await db.query(
       'DELETE FROM searches WHERE id = ? AND user_id = ?',
       [searchId, req.user.id]
     );
 
-    if (result.affectedRows === 0)
-      return res.status(404).json({ message: 'SEARCH NOT FOUND OR UNAUTHORIZED' });
+    if (result.affectedRows === 0) {
+      logger.warn('Search deletion failed - not found or unauthorized', {
+        userId: req.user.id,
+        searchId
+      });
+      return res.status(404).json({ message: 'Search not found or unauthorized' });
+    }
 
-    res.json({ message: 'SEARCH DELETED SUCCESSFULLY' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'ERROR DELETING SEARCH' });
+    logger.info('Search deleted', { userId: req.user.id, searchId });
+    return res.json({ message: 'Search deleted successfully' });
+
+  } catch (error) {
+    logger.error('Error deleting search', {
+      searchId,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    return res.status(500).json({ message: 'Error deleting search' });
   }
 };
 
 /**
- * PERFORMANCE CONSIDERATIONS:
- * 1. IMPLEMENT API RESPONSE CACHING FOR FREQUENT QUERIES
- * 2. ADD PAGINATION SUPPORT FOR LARGE RESULT SETS
- * 3. USE DATABASE INDEXES ON SEARCHES.USER_ID AND CREATED_AT
- * 
- * SECURITY IMPROVEMENTS:
- * 1. SANITIZE USER INPUT FOR SEARCH QUERY PARAMETERS
- * 2. LIMIT MAX SEARCH HISTORY ITEMS PER USER
- * 3. IMPLEMENT RATE LIMITING FOR API REQUESTS
- * 
- * ERROR HANDLING STRATEGY:
- * 1. ADD RETRY LOGIC FOR OPENVERSE API CALLS
- * 2. IMPLEMENT CIRCUIT BREAKER PATTERN FOR EXTERNAL API
- * 3. USE TRANSACTIONS FOR DATABASE WRITE OPERATIONS
+ * Middleware for validating search parameters
  */
+export const validateSearchParams = [
+  // Validate query exists and is not empty
+  (req: Request, res: Response, next: Function) => {
+    if (!req.query.q) {
+      return res.status(400).json({ message: 'Search query is required' });
+    }
+    next();
+  },
+  // Validate media_type if provided
+  (req: Request, res: Response, next: Function) => {
+    if (req.query.media_type && !['image', 'audio', 'video'].includes(req.query.media_type)) {
+      return res.status(400).json({ message: 'Invalid media type' });
+    }
+    next();
+  }
+];
 
 /**
- * RELATED MODULES:
- * - authMiddleware.js: HANDLES USER AUTHENTICATION
- * - openverseClient.js: POTENTIAL ABSTRACTION FOR API CALLS
- * - searchModel.js: DATA LAYER FOR SEARCH OPERATIONS
- * - cacheMiddleware.js: RESPONSE CACHING IMPLEMENTATION
+ * Utility function to cache Openverse API responses
  */
+const cacheApiResponse = async (key: string, data: any): Promise<void> => {
+  // Implementation would use Redis or similar
+  // Example: await redisClient.setex(key, 3600, JSON.stringify(data));
+};
 
 /**
- * OPENVERSE API DOCUMENTATION NOTES:
- * - SUPPORTED MEDIA TYPES: IMAGE, AUDIO, VIDEO
- * - LICENSE TYPES: CC0, CC-BY, CC-BY-SA, ETC.
- * - RATE LIMIT: 200 REQUESTS/DAY (CHECK CURRENT POLICIES)
- * - RESPONSE FORMAT: JSON WITH PAGINATION METADATA
+ * Utility function to get cached Openverse API responses
  */
+const getCachedResponse = async (key: string): Promise<any | null> => {
+  // Implementation would use Redis or similar
+  // Example: const cached = await redisClient.get(key);
+  // return cached ? JSON.parse(cached) : null;
+  return null;
+};
