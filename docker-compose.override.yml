@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  backend:
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    ports:
+      - "5000:5000"
+      - "9229:9229" # Node debug port
+    command: npm run dev
+
+  frontend:
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    command: npm run dev
+
+  # Development tools
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: media_search_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    networks:
+      - media-network
+
+  redis-commander:
+    image: rediscommander/redis-commander
+    container_name: media_search_redis_commander
+    environment:
+      REDIS_HOSTS: redis
+    ports:
+      - "8081:8081"
+    networks:
+      - media-network
