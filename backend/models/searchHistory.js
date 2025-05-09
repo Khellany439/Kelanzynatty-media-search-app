@@ -1,109 +1,173 @@
 /**
- * SEARCH HISTORY DATA MODEL
- * PROVIDES DATABASE OPERATIONS FOR USER SEARCH HISTORY MANAGEMENT.
- * IMPLEMENTS CRUD OPERATIONS FOR SEARCH RECORDS WITH USER-SPECIFIC DATA ISOLATION.
+ * Search History Data Model
  * 
- * KEY FUNCTIONALITIES:
- * - SEARCH HISTORY PERSISTENCE
- * - RECENT SEARCH RETRIEVAL
- * - SEARCH RECORD DELETION
+ * Provides type-safe database operations for user search history management.
+ * Implements CRUD operations with proper user isolation and error handling.
  * 
- * AUTHOR: KELANZY
- * DATE: 2023-10-23
- * VERSION: 1.0.0
- * REQUIREMENTS:
- * - MYSQL DATABASE CONNECTION POOL
- * - SEARCHES TABLE SCHEMA:
- *   (id, user_id, query, media_type, created_at)
+ * @module models/SearchHistory
+ * @version 2.0.0
+ * @license MIT
  */
 
-const db = require('../config/db');
+import { db } from '../config/database';
+import { logger } from '../utils/logger';
 
-const SearchHistory = {
+// Type definitions
+interface SearchRecord {
+  id: number;
+  user_id: number;
+  query: string;
+  media_type: 'image' | 'audio' | 'video';
+  created_at: Date;
+}
+
+interface SearchHistoryResult {
+  id: number;
+  query: string;
+  media_type: string;
+  created_at: Date;
+}
+
+class SearchHistory {
   /**
-   * SAVE USER SEARCH OPERATION
+   * Save a user search operation
    * 
-   * @param {number} userId - AUTHENTICATED USER ID
-   * @param {string} query - SEARCH QUERY STRING
-   * @param {string} mediaType - MEDIA TYPE FILTER
-   * @returns {Promise<number>} INSERTED SEARCH RECORD ID
+   * @param userId - Authenticated user ID
+   * @param query - Search query string
+   * @param mediaType - Type of media searched
+   * @returns Promise with the inserted record ID
    * 
-   * ERROR HANDLING:
-   * - THROWS DATABASE ERRORS TO CALLER
-   * - PROPAGATES CONSTRAINT VIOLATIONS
+   * @throws Database errors
    */
-  async save(userId, query, mediaType) {
-    const [result] = await db.execute(
-      'INSERT INTO searches (user_id, query, media_type) VALUES (?, ?, ?)',
-      [userId, query, mediaType]
-    );
-    return result.insertId;
-  },
+  static async save(
+    userId: number,
+    query: string,
+    mediaType: 'image' | 'audio' | 'video'
+  ): Promise<number> {
+    try {
+      const [result] = await db.execute<{ insertId: number }>(
+        `INSERT INTO searches (user_id, query, media_type) 
+         VALUES (?, ?, ?)`,
+        [userId, query, mediaType]
+      );
+      
+      logger.debug('Search saved', { userId, query, mediaType });
+      return result.insertId;
+      
+    } catch (error) {
+      logger.error('Failed to save search', { 
+        userId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw new Error('Failed to save search history');
+    }
+  }
 
   /**
-   * RETRIEVE USER'S RECENT SEARCHES
+   * Retrieve user's recent searches
    * 
-   * @param {number} userId - AUTHENTICATED USER ID
-   * @param {number} limit - MAXIMUM RESULTS TO RETURN (DEFAULT: 10)
-   * @returns {Promise<Array>} ARRAY OF SEARCH RECORDS
-   * 
-   * FEATURES:
-   * - RESULTS ORDERED BY RECENT FIRST
-   * - EXCLUDES SENSITIVE INTERNAL FIELDS
-   * - LIMITS RESULTS TO PREVENT OVERFETCHING
+   * @param userId - Authenticated user ID
+   * @param limit - Maximum results to return (default: 10)
+   * @returns Promise with array of search records
    */
-  async getRecent(userId, limit = 10) {
-    const [results] = await db.execute(
-      'SELECT id, query, media_type, created_at FROM searches WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
-      [userId, limit]
-    );
-    return results;
-  },
+  static async getRecent(
+    userId: number, 
+    limit: number = 10
+  ): Promise<SearchHistoryResult[]> {
+    try {
+      const [results] = await db.execute<SearchHistoryResult[]>(
+        `SELECT id, query, media_type, created_at 
+         FROM searches 
+         WHERE user_id = ? 
+         ORDER BY created_at DESC 
+         LIMIT ?`,
+        [userId, limit]
+      );
+      
+      return results;
+      
+    } catch (error) {
+      logger.error('Failed to fetch search history', { 
+        userId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw new Error('Failed to retrieve search history');
+    }
+  }
 
   /**
-   * DELETE SPECIFIC SEARCH RECORD
+   * Delete a specific search record
    * 
-   * @param {number} userId - AUTHENTICATED USER ID
-   * @param {number} searchId - TARGET SEARCH RECORD ID
-   * @returns {Promise<boolean>} DELETION SUCCESS STATUS
+   * @param userId - Authenticated user ID
+   * @param searchId - Target search record ID
+   * @returns Promise with deletion success status
    * 
-   * SECURITY:
-   * - ENSURES USER OWNERSHIP BEFORE DELETION
-   * - PREVENTS CROSS-USER DATA MODIFICATION
+   * @throws Database errors
    */
-  async delete(userId, searchId) {
-    const [result] = await db.execute(
-      'DELETE FROM searches WHERE id = ? AND user_id = ?',
-      [searchId, userId]
-    );
-    return result.affectedRows > 0;
-  },
-};
+  static async delete(
+    userId: number, 
+    searchId: number
+  ): Promise<boolean> {
+    try {
+      const [result] = await db.execute<{ affectedRows: number }>(
+        `DELETE FROM searches 
+         WHERE id = ? AND user_id = ?`,
+        [searchId, userId]
+      );
+      
+      const success = result.affectedRows > 0;
+      if (success) {
+        logger.info('Search deleted', { userId, searchId });
+      } else {
+        logger.warn('Search deletion failed - not found or unauthorized', { 
+          userId, 
+          searchId 
+        });
+      }
+      
+      return success;
+      
+    } catch (error) {
+      logger.error('Failed to delete search', { 
+        userId,
+        searchId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw new Error('Failed to delete search record');
+    }
+  }
 
-/**
- * ERROR HANDLING STRATEGY:
- * 1. ALL ERRORS PROPAGATE TO CALLER FOR CONTEXT-SPECIFIC HANDLING
- * 2. USE TRANSACTIONAL QUERIES FOR CRITICAL OPERATIONS
- * 3. IMPLEMENT DATABASE CONNECTION HEALTH CHECKS
- * 
- * PERFORMANCE OPTIMIZATIONS:
- * - INDEX ON (user_id, created_at) FOR FAST RECENT LOOKUPS
- * - QUERY CACHING FOR FREQUENT SEARCH PATTERNS
- * - ARCHIVE OLD SEARCHES TO SEPARATE TABLE
- * 
- * FUTURE ENHANCEMENTS:
- * 1. ADD SEARCH CATEGORY TAGGING
- * 2. IMPLEMENT SEARCH FILTER PRESETS
- * 3. ADD SOFT DELETE FUNCTIONALITY
- * 4. INCLUDE SEARCH RESULT METADATA STORAGE
- */
+  /**
+   * Clear all search history for a user
+   * 
+   * @param userId - Authenticated user ID
+   * @returns Promise with deletion count
+   */
+  static async clearAll(
+    userId: number
+  ): Promise<number> {
+    try {
+      const [result] = await db.execute<{ affectedRows: number }>(
+        `DELETE FROM searches 
+         WHERE user_id = ?`,
+        [userId]
+      );
+      
+      logger.info('Cleared all search history', { 
+        userId,
+        count: result.affectedRows 
+      });
+      
+      return result.affectedRows;
+      
+    } catch (error) {
+      logger.error('Failed to clear search history', { 
+        userId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw new Error('Failed to clear search history');
+    }
+  }
+}
 
-/**
- * RELATED MODULES:
- * - mediaController.js: CONSUMES SEARCH HISTORY OPERATIONS
- * - db.js: PROVIDES DATABASE CONNECTION POOL
- * - userModel.js: MANAGES USER DATA RELATIONSHIPS
- * - cache.js: HANDLES QUERY RESULT CACHING
- */
-
-module.exports = SearchHistory;
+export { SearchHistory, SearchHistoryResult };
