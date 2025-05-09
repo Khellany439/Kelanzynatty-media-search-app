@@ -23,6 +23,7 @@ import { RootState } from "../app/store";
 import { searchOpenverse } from "../api/openverse";
 import SearchResults from "../pages/SearchResults";
 import RecentSearches from "./RecentSearches";
+import "../styles/SearchPage";
 
 // -----------------------------------------------------------------------------
 // Type Definitions

@@ -19,6 +19,7 @@
  */
 
 import React from 'react';
+import "../styles/SearchResults";
 
 // -----------------------------------------------------------------------------
 // Type Definitions

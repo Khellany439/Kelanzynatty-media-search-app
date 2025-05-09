@@ -32,6 +32,7 @@ import SearchHistory from '../components/Search/SearchHistory';
 import { MediaResult, MediaType, SortOption } from '../types/media';
 import { useDebounce } from '../hooks/useDebounce';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import "../styles/Home";
 
 // Mock API service (replace with actual API calls)
 const mockSearchAPI = {

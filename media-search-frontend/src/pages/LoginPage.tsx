@@ -30,6 +30,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { setCredentials } from '../features/auth/authSlice';
 import { RootState } from '../app/store';
+import "../styles/Login";
 
 // -----------------------------------------------------------------------------
 // Component Implementation
